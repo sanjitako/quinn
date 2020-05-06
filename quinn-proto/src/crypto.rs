@@ -72,7 +72,9 @@ pub trait Session: Send + Sized {
     /// This should be called with the contents of `CRYPTO` frames. If it returns `Ok`, the
     /// caller should call `write_handshake()` to check if the crypto protocol has anything
     /// to send to the peer.
-    fn read_handshake(&mut self, buf: &[u8]) -> Result<(), TransportError>;
+    ///
+    /// On success, returns `true` iff the new handshake data populated `authentication_data`.
+    fn read_handshake(&mut self, buf: &[u8]) -> Result<bool, TransportError>;
 
     /// The peer's QUIC transport parameters
     ///

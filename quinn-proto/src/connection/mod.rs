@@ -1428,7 +1428,9 @@ where
                 return Ok(());
             }
             trace!("read {} CRYPTO bytes", n);
-            self.crypto.read_handshake(&buf[..n])?;
+            if self.crypto.read_handshake(&buf[..n])? {
+                self.events.push_back(Event::AuthenticationDataReady);
+            }
         }
     }
 
@@ -3040,6 +3042,8 @@ impl RttEstimator {
 /// Events of interest to the application
 #[derive(Debug)]
 pub enum Event {
+    /// The connection's authentication data has been populated with its initial contents
+    AuthenticationDataReady,
     /// The connection was successfully established
     Connected,
     /// The connection was lost

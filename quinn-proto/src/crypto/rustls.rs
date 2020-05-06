@@ -99,7 +99,8 @@ impl crypto::Session for TlsSession {
         }
     }
 
-    fn read_handshake(&mut self, buf: &[u8]) -> Result<(), TransportError> {
+    fn read_handshake(&mut self, buf: &[u8]) -> Result<bool, TransportError> {
+        let had_alpn = self.get_alpn_protocol().is_some();
         self.read_hs(buf).map_err(|e| {
             if let Some(alert) = self.get_alert() {
                 TransportError {
@@ -110,7 +111,8 @@ impl crypto::Session for TlsSession {
             } else {
                 TransportError::PROTOCOL_VIOLATION(format!("TLS error: {}", e))
             }
-        })
+        })?;
+        Ok(!had_alpn && self.get_alpn_protocol().is_some())
     }
 
     fn transport_parameters(&self) -> Result<Option<TransportParameters>, TransportError> {
@@ -221,16 +223,16 @@ pub struct AuthenticationData {
     /// For clients, this is the certificate chain of the server. For servers, this is the
     /// certificate chain of the client, if client authentication was completed.
     ///
-    /// `None` if this data was requested from the session before this value is available.
-    ///
-    /// If this is `None`, and `Connection::is_handshaking` returns `false`, the connection
-    /// will have already been closed.
+    /// Available while fully connected, if provided by the peer.
     pub peer_certificates: Option<CertificateChain>,
     /// The negotiated application protocol
+    ///
+    /// Available after `Event::AuthenticationDataReady`.
     pub protocol: Option<Vec<u8>>,
     /// The server name specified by the client
     ///
-    /// `None` for outgoing connections.
+    /// `None` for outgoing connections. Available after `Event::AuthenticationDataReady` for
+    /// incoming connections.
     pub server_name: Option<String>,
 }
 

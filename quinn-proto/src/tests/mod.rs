@@ -396,6 +396,10 @@ fn zero_rtt_rejection() {
     let server_conn = pair.server.assert_accept();
     assert_matches!(
         pair.server_conn_mut(server_conn).poll(),
+        Some(Event::AuthenticationDataReady)
+    );
+    assert_matches!(
+        pair.server_conn_mut(server_conn).poll(),
         Some(Event::Connected)
     );
     assert_matches!(pair.server_conn_mut(server_conn).poll(), None);
@@ -428,6 +432,10 @@ fn zero_rtt_rejection() {
     let server_conn = pair.server.assert_accept();
     assert_matches!(
         pair.server_conn_mut(server_conn).poll(),
+        Some(Event::AuthenticationDataReady)
+    );
+    assert_matches!(
+        pair.server_conn_mut(server_conn).poll(),
         Some(Event::Connected)
     );
     assert_matches!(pair.server_conn_mut(server_conn).poll(), None);
@@ -457,6 +465,10 @@ fn alpn_success() {
     let client_conn = pair.begin_connect(client_config);
     pair.drive();
     let server_conn = pair.server.assert_accept();
+    assert_matches!(
+        pair.server_conn_mut(server_conn).poll(),
+        Some(Event::AuthenticationDataReady)
+    );
     assert_matches!(
         pair.server_conn_mut(server_conn).poll(),
         Some(Event::Connected)
