@@ -109,7 +109,7 @@ mod qpack;
 pub mod qpack;
 
 use err_derive::Error;
-use quinn::{ApplicationClose, ConnectionError, ReadError, WriteError};
+use quinn::{ApplicationClose, ConnectionError, ReadError, VarInt, WriteError};
 use std::{error::Error as StdError, io::ErrorKind};
 
 use proto::ErrorCode;
@@ -341,6 +341,12 @@ impl From<ErrorCode> for HttpError {
             ErrorCode::QPACK_DECODER_STREAM_ERROR => HttpError::QpackDecoderStreamError,
             _ => HttpError::Unknown(code.0),
         }
+    }
+}
+
+impl From<VarInt> for HttpError {
+    fn from(code: VarInt) -> Self {
+        ErrorCode::from(code).into()
     }
 }
 
