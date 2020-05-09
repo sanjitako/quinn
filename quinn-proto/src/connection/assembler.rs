@@ -150,10 +150,21 @@ impl Assembler {
         self.data.pop().map(|x| (x.offset, x.bytes))
     }
 
-    pub(crate) fn insert(&mut self, offset: u64, bytes: Bytes) {
+    pub(crate) fn insert(&mut self, mut offset: u64, mut bytes: Bytes) {
         self.limit = self.limit.max(offset + bytes.len() as u64);
         if let State::Unordered { ref mut recvd } = self.state {
-            recvd.insert(offset..offset + bytes.len() as u64);
+            // Discard duplicate data
+            for duplicate in recvd.insert_drain(offset..offset + bytes.len() as u64) {
+                if duplicate.start > offset {
+                    self.data.push(Chunk {
+                        offset,
+                        bytes: bytes.split_to((duplicate.start - offset) as usize),
+                    });
+                    offset = duplicate.start;
+                }
+                bytes.advance((duplicate.end - offset) as usize);
+                offset = duplicate.end;
+            }
         }
         if bytes.is_empty() || self.stopped {
             return;
@@ -439,6 +450,26 @@ mod test {
         assert_eq!(x.read_unordered(), None);
         x.insert(3, Bytes::from_static(b"def"));
         assert_eq!(x.read_unordered(), Some((3, Bytes::from_static(b"def"))));
+        assert_eq!(x.read_unordered(), None);
+    }
+
+    #[test]
+    fn unordered_dedup() {
+        let mut x = Assembler::new();
+        x.insert(3, Bytes::from_static(b"def"));
+        assert_eq!(x.read_unordered(), Some((3, Bytes::from_static(b"def"))));
+        assert_eq!(x.read_unordered(), None);
+        x.insert(0, Bytes::from_static(b"abcdefghi"));
+        assert_eq!(x.read_unordered(), Some((0, Bytes::from_static(b"abc"))));
+        assert_eq!(x.read_unordered(), Some((6, Bytes::from_static(b"ghi"))));
+        assert_eq!(x.read_unordered(), None);
+        x.insert(8, Bytes::from_static(b"ijkl"));
+        assert_eq!(x.read_unordered(), Some((9, Bytes::from_static(b"jkl"))));
+        assert_eq!(x.read_unordered(), None);
+        x.insert(12, Bytes::from_static(b"mno"));
+        assert_eq!(x.read_unordered(), Some((12, Bytes::from_static(b"mno"))));
+        assert_eq!(x.read_unordered(), None);
+        x.insert(2, Bytes::from_static(b"cde"));
         assert_eq!(x.read_unordered(), None);
     }
 }

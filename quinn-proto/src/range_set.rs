@@ -138,6 +138,33 @@ impl RangeSet {
         before || after
     }
 
+    /// Add a range to the set, returning the ranges it replaced
+    pub fn insert_drain(&mut self, mut range: Range<u64>) -> InsertDrain<'_> {
+        let pred = if let Some((prev_start, prev_end)) = self.pred(range.start) {
+            if prev_end >= range.start {
+                self.0.remove(&prev_start);
+                let replaced_start = range.start;
+                range.start = range.start.min(prev_start);
+                let replaced_end = range.end.min(prev_end);
+                range.end = range.end.max(prev_end);
+                if replaced_start != replaced_end {
+                    Some(replaced_start..replaced_end)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        InsertDrain {
+            set: self,
+            range,
+            pred,
+        }
+    }
+
     pub fn add(&mut self, other: &RangeSet) {
         for (&start, &end) in &other.0 {
             self.insert(start..end);
@@ -244,6 +271,43 @@ impl<'a> DoubleEndedIterator for EltIter<'a> {
     }
 }
 
+pub struct InsertDrain<'a> {
+    set: &'a mut RangeSet,
+    pred: Option<Range<u64>>,
+    range: Range<u64>,
+}
+
+impl Iterator for InsertDrain<'_> {
+    type Item = Range<u64>;
+    fn next(&mut self) -> Option<Range<u64>> {
+        if let Some(pred) = self.pred.take() {
+            return Some(pred);
+        }
+
+        let (next_start, next_end) = self.set.succ(self.range.start)?;
+        if next_start > self.range.end {
+            return None;
+        }
+        self.set.0.remove(&next_start);
+        let replaced_end = self.range.end.min(next_end);
+        self.range.end = self.range.end.max(next_end);
+        if next_start == replaced_end {
+            None
+        } else {
+            Some(next_start..replaced_end)
+        }
+    }
+}
+
+impl Drop for InsertDrain<'_> {
+    fn drop(&mut self) {
+        // Ensure we drain all remaining overlapping ranges
+        while let Some(_) = self.next() {}
+        // Insert the new range
+        self.set.0.insert(self.range.start, self.range.end);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -335,5 +399,59 @@ mod tests {
         assert!(set.insert(4..5));
         assert!(set.remove(0..5));
         assert!(set.is_empty());
+    }
+
+    #[test]
+    fn insert_drain_contained() {
+        let mut set = RangeSet::new();
+        set.insert(2..4);
+        assert_eq!(set.insert_drain(1..5).collect::<Vec<_>>(), &[2..4]);
+        assert_eq!(set.len(), 1);
+        assert_eq!(set.peek_min().unwrap(), 1..5);
+    }
+
+    #[test]
+    fn insert_drain_contains() {
+        let mut set = RangeSet::new();
+        set.insert(1..5);
+        assert_eq!(set.insert_drain(2..4).collect::<Vec<_>>(), &[2..4]);
+        assert_eq!(set.len(), 1);
+        assert_eq!(set.peek_min().unwrap(), 1..5);
+    }
+
+    #[test]
+    fn insert_drain_pred() {
+        let mut set = RangeSet::new();
+        set.insert(2..4);
+        assert_eq!(set.insert_drain(3..5).collect::<Vec<_>>(), &[3..4]);
+        assert_eq!(set.len(), 1);
+        assert_eq!(set.peek_min().unwrap(), 2..5);
+    }
+
+    #[test]
+    fn insert_drain_succ() {
+        let mut set = RangeSet::new();
+        set.insert(2..4);
+        assert_eq!(set.insert_drain(1..3).collect::<Vec<_>>(), &[2..3]);
+        assert_eq!(set.len(), 1);
+        assert_eq!(set.peek_min().unwrap(), 1..4);
+    }
+
+    #[test]
+    fn insert_drain_exact_pred() {
+        let mut set = RangeSet::new();
+        set.insert(2..4);
+        assert_eq!(set.insert_drain(4..6).collect::<Vec<_>>(), &[]);
+        assert_eq!(set.len(), 1);
+        assert_eq!(set.peek_min().unwrap(), 2..6);
+    }
+
+    #[test]
+    fn insert_drain_exact_succ() {
+        let mut set = RangeSet::new();
+        set.insert(2..4);
+        assert_eq!(set.insert_drain(0..2).collect::<Vec<_>>(), &[]);
+        assert_eq!(set.len(), 1);
+        assert_eq!(set.peek_min().unwrap(), 0..4);
     }
 }
