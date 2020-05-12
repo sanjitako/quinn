@@ -16,7 +16,7 @@ pub(crate) struct Assembler {
     /// Whether to discard data
     stopped: bool,
     /// First offset we haven't received any data at or after
-    limit: u64,
+    end: u64,
 }
 
 impl Assembler {
@@ -151,7 +151,8 @@ impl Assembler {
     }
 
     pub(crate) fn insert(&mut self, mut offset: u64, mut bytes: Bytes) {
-        self.limit = self.limit.max(offset + bytes.len() as u64);
+        self.end = self.end.max(offset + bytes.len() as u64);
+
         if let State::Unordered { ref mut recvd } = self.state {
             // Discard duplicate data
             for duplicate in recvd.insert_drain(offset..offset + bytes.len() as u64) {
@@ -189,25 +190,25 @@ impl Assembler {
     }
 
     /// Offset after the largest byte received
-    pub(crate) fn limit(&self) -> u64 {
-        self.limit
+    pub(crate) fn end(&self) -> u64 {
+        self.end
     }
 
-    /// Whether all data prior to `self.limit()` has been read
+    /// Whether all data prior to `self.end()` has been read
     pub(crate) fn is_fully_read(&self) -> bool {
         match self.state {
             State::Ordered { .. } => {
-                // Any data we haven't received below `limit` is necessarily followed by
+                // Any data we haven't received below `end` is necessarily followed by
                 // still-buffered data that we *have* received which was responsible for increasing
-                // `limit`, because such data cannot be yielded to the application.
+                // `end`, because such data cannot be yielded to the application.
                 self.data.is_empty()
             }
             State::Unordered { ref recvd } => {
-                // Unordered reads allow `data` to be drained even when there are gaps below `limit`
+                // Unordered reads allow `data` to be drained even when there are gaps below `end`
                 // that we haven't yet received, so we need to check for such gaps
                 // explicitly. `RangeSet` is guaranteed to have a minimal representation of its
-                // ranges, and `limit` is always equal to the end of the highest range, so all data
-                // below `limit` is guaranteed to have been read by the application if `recvd` is
+                // ranges, and `end` is always equal to the end of the highest range, so all data
+                // below `end` is guaranteed to have been read by the application if `recvd` is
                 // empty, or if the buffer is empty and `recvd` contains a single range starting at
                 // zero.
                 recvd.len() <= 1
