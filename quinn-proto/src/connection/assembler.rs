@@ -24,10 +24,10 @@ impl Assembler {
         Self::default()
     }
 
-    pub(crate) fn read(&mut self, buf: &mut [u8]) -> usize {
+    pub(crate) fn read(&mut self, buf: &mut [u8]) -> Result<usize, IllegalOrderedRead> {
         let mut read = 0;
         loop {
-            if self.consume(buf, &mut read) {
+            if self.consume(buf, &mut read)? {
                 self.pop();
             } else {
                 break;
@@ -37,7 +37,7 @@ impl Assembler {
             }
         }
         self.bytes_read += read as u64;
-        read
+        Ok(read)
     }
 
     pub(crate) fn read_unordered(&mut self) -> Option<(u64, Bytes)> {
@@ -58,23 +58,23 @@ impl Assembler {
     // Read as much from the first chunk in the heap as fits in the buffer.
     // Takes the buffer to read into and the amount of bytes that has already
     // been read into it. Returns whether the first chunk has been fully consumed.
-    fn consume(&mut self, buf: &mut [u8], read: &mut usize) -> bool {
+    fn consume(&mut self, buf: &mut [u8], read: &mut usize) -> Result<bool, IllegalOrderedRead> {
         let mut chunk = match self.data.peek_mut() {
             Some(chunk) => chunk,
-            None => return false,
+            None => return Ok(false),
         };
 
         let offset = match self.state {
             State::Ordered { ref mut offset } => offset,
-            _ => panic!("cannot perform ordered reads following unordered reads on a stream"),
+            _ => return Err(IllegalOrderedRead),
         };
 
         // If this chunk is either after the current offset or fully before it,
         // return directly, indicating whether the chunk can be discarded.
         if chunk.offset > *offset {
-            return false;
+            return Ok(false);
         } else if (chunk.offset + chunk.bytes.len() as u64) <= *offset {
-            return true;
+            return Ok(true);
         }
 
         // Determine `start` and `len` of slice to read from chunk
@@ -87,7 +87,7 @@ impl Assembler {
         *read += len;
         *offset += len as u64;
 
-        if start + len == chunk.bytes.len() {
+        Ok(if start + len == chunk.bytes.len() {
             // This chunk has been fully consumed and can be discarded
             true
         } else {
@@ -96,7 +96,7 @@ impl Assembler {
             chunk.offset = chunk.offset + start as u64 + len as u64;
             chunk.bytes.advance(start + len);
             false
-        }
+        })
     }
 
     // Copy the buffered chunk data to new chunks backed by a single buffer to
@@ -136,7 +136,7 @@ impl Assembler {
     #[cfg(test)]
     fn next(&mut self, size: usize) -> Option<Box<[u8]>> {
         let mut buf = vec![0; size];
-        let read = self.read(&mut buf);
+        let read = self.read(&mut buf).unwrap();
         buf.resize(read, 0);
         if !buf.is_empty() {
             Some(buf.into())
@@ -281,6 +281,10 @@ impl Default for State {
         State::Ordered { offset: 0 }
     }
 }
+
+/// Error indicating that an ordered read was performed on a stream after an unordered read
+#[derive(Debug, Copy, Clone)]
+pub struct IllegalOrderedRead;
 
 #[cfg(test)]
 mod test {
