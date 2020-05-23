@@ -28,7 +28,7 @@ use crate::{
         ConnectionEvent, ConnectionEventInner, ConnectionId, EcnCodepoint, EndpointEvent,
         EndpointEventInner, IssuedCid, ResetToken,
     },
-    token,
+    token::Token,
     transport_parameters::TransportParameters,
     Side, Transmit, TransportError, MAX_CID_SIZE, MIN_INITIAL_SIZE, MIN_MTU, RESET_TOKEN_SIZE,
     VERSION,
@@ -532,13 +532,12 @@ where
         let (retry_src_cid, orig_dst_cid) = if server_config.use_stateless_retry {
             if token.is_empty() {
                 // First Initial
-                let token = token::generate(
-                    &*server_config.token_key,
-                    &remote,
-                    &temp_loc_cid,
-                    &dst_cid,
-                    SystemTime::now(),
-                );
+                let token = Token {
+                    src_cid: temp_loc_cid,
+                    dst_cid,
+                    issued: SystemTime::now(),
+                }
+                .encode(&*server_config.token_key, &remote);
                 let mut buf = Vec::new();
                 let header = Header::Retry {
                     src_cid: temp_loc_cid,
@@ -557,15 +556,15 @@ where
                 return None;
             }
 
-            match token::check(&*server_config.token_key, &remote, &token) {
-                Some((src_cid, dst_cid, issued))
-                    if issued
+            match Token::decode_and_validate(&*server_config.token_key, &remote, &token) {
+                Some(token)
+                    if token.issued
                         + Duration::from_micros(
                             self.server_config.as_ref().unwrap().retry_token_lifetime,
                         )
                         > SystemTime::now() =>
                 {
-                    (Some(src_cid), dst_cid)
+                    (Some(token.src_cid), token.dst_cid)
                 }
                 _ => {
                     debug!("rejecting invalid stateless retry token");
