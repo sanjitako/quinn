@@ -31,6 +31,7 @@ where
     stream: StreamId,
     is_0rtt: bool,
     finishing: Option<oneshot::Receiver<Option<WriteError>>>,
+    stopped_event: Option<oneshot::Receiver<VarInt>>,
 }
 
 impl<S> SendStream<S>
@@ -43,6 +44,7 @@ where
             stream,
             is_0rtt,
             finishing: None,
+            stopped_event: None,
         }
     }
 
@@ -149,6 +151,27 @@ where
         conn.wake();
     }
 
+    /// Completes if/when the peer stops the stream, yielding the error code
+    pub fn stopped(&mut self) -> Stopped<'_, S> {
+        Stopped { stream: self }
+    }
+
+    #[doc(hidden)]
+    pub fn poll_stopped(&mut self, cx: &mut Context) -> Poll<VarInt> {
+        let mut conn = self.conn.lock().unwrap();
+        if self.stopped_event.is_none() {
+            let (send, recv) = oneshot::channel();
+            self.stopped_event = Some(recv);
+            conn.stopped.insert(self.stream, send);
+        }
+
+        self.stopped_event
+            .as_mut()
+            .unwrap()
+            .poll_unpin(cx)
+            .map(|x| x.unwrap())
+    }
+
     #[doc(hidden)]
     pub fn id(&self) -> StreamId {
         self.stream
@@ -227,6 +250,25 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         self.get_mut().stream.poll_finish(cx)
+    }
+}
+
+/// Future produced by `SendStream::stopped`
+pub struct Stopped<'a, S>
+where
+    S: proto::crypto::Session,
+{
+    stream: &'a mut SendStream<S>,
+}
+
+impl<S> Future for Stopped<'_, S>
+where
+    S: proto::crypto::Session,
+{
+    type Output = VarInt;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        self.get_mut().stream.poll_stopped(cx)
     }
 }
 
